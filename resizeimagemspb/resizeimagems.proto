@@ -10,7 +10,7 @@ message ResizeImageRequest {
 }
 
 message ResizeImageResponse {
-    int32 images_resized = 1;
+    bool images_resized = 1;
 }
 
 service ResizeImageMicroService {
