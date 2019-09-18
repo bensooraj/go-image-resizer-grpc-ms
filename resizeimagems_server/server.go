@@ -11,6 +11,7 @@ import (
 	"github.com/anthonynsimon/bild/imgio"
 	"github.com/anthonynsimon/bild/transform"
 	"github.com/bensooraj/go-image-resizer-grpc-ms/resizeimagemspb"
+	"github.com/bensooraj/go-image-resizer-grpc-ms/s3upload"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 )
@@ -51,11 +52,13 @@ func (*server) ResizeImage(ctx context.Context, req *resizeimagemspb.ResizeImage
 	if err := imgio.Save(imageUploadDirName+req.ImageId+"_medium"+imageFileExtension, resized75, imageEncodingType); err != nil {
 		fmt.Println(err)
 	}
+	s3upload.UploadImageToS3(req.ImageId, req.ImageId+"_medium"+imageFileExtension, imageUploadDirName+req.ImageId+"_medium"+imageFileExtension)
 
 	resized50 := transform.Resize(img, int(0.50*float64(imageSize.X)), int(0.50*float64(imageSize.Y)), transform.Linear)
 	if err := imgio.Save(imageUploadDirName+req.ImageId+"_small"+imageFileExtension, resized50, imageEncodingType); err != nil {
 		fmt.Println(err)
 	}
+	s3upload.UploadImageToS3(req.ImageId, req.ImageId+"_small"+imageFileExtension, imageUploadDirName+req.ImageId+"_small"+imageFileExtension)
 
 	return &resizeimagemspb.ResizeImageResponse{
 		ImagesResized: 1,
