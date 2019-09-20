@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/anthonynsimon/bild/imgio"
 	"github.com/anthonynsimon/bild/transform"
@@ -16,11 +18,14 @@ import (
 	"google.golang.org/grpc"
 )
 
+var wg sync.WaitGroup
+var mut sync.Mutex
+
 type server struct {
 }
 
 func (*server) ResizeImage(ctx context.Context, req *resizeimagemspb.ResizeImageRequest) (*resizeimagemspb.ResizeImageResponse, error) {
-	// Get the GITHUB_USERNAME environment variable
+	// Get the IMAGE_UPLOAD_DIRECTORY environment variable
 	imageUploadDirName, _ := os.LookupEnv("IMAGE_UPLOAD_DIRECTORY")
 
 	fmt.Printf("Image resize request received: %v\n", req)
@@ -32,7 +37,29 @@ func (*server) ResizeImage(ctx context.Context, req *resizeimagemspb.ResizeImage
 		return nil, nil
 	}
 
-	imageSize := img.Bounds().Size()
+	scaleToPrefixMap := map[float64]string{
+		0.75: "_medium",
+		0.50: "_small",
+	}
+	for scale, prefix := range scaleToPrefixMap {
+		fmt.Printf("scale: %v -> prefix: %v\n", scale, prefix)
+		wg.Add(1)
+		go resizeAndUpload(img, req.ImageId, imageFileExtension, scale, prefix)
+	}
+
+	wg.Wait()
+
+	return &resizeimagemspb.ResizeImageResponse{
+		ImagesResized: 2,
+	}, nil
+}
+
+func resizeAndUpload(baseImage image.Image, imageID, imageFileExtension string, scale float64, prefix string) {
+	defer wg.Done()
+	// Get the IMAGE_UPLOAD_DIRECTORY environment variable
+	imageUploadDirName, _ := os.LookupEnv("IMAGE_UPLOAD_DIRECTORY")
+
+	imageSize := baseImage.Bounds().Size()
 
 	fmt.Printf("X: %v\n", imageSize.X)
 	fmt.Printf("Y: %v\n", imageSize.Y)
@@ -48,21 +75,13 @@ func (*server) ResizeImage(ctx context.Context, req *resizeimagemspb.ResizeImage
 		break
 	}
 
-	resized75 := transform.Resize(img, int(0.75*float64(imageSize.X)), int(0.75*float64(imageSize.Y)), transform.Linear)
-	if err := imgio.Save(imageUploadDirName+req.ImageId+"_medium"+imageFileExtension, resized75, imageEncodingType); err != nil {
+	mut.Lock()
+	resized75 := transform.Resize(baseImage, int(scale*float64(imageSize.X)), int(scale*float64(imageSize.Y)), transform.Linear)
+	mut.Unlock()
+	if err := imgio.Save(imageUploadDirName+imageID+prefix+imageFileExtension, resized75, imageEncodingType); err != nil {
 		fmt.Println(err)
 	}
-	s3upload.UploadImageToS3(req.ImageId, req.ImageId+"_medium"+imageFileExtension, imageUploadDirName+req.ImageId+"_medium"+imageFileExtension)
-
-	resized50 := transform.Resize(img, int(0.50*float64(imageSize.X)), int(0.50*float64(imageSize.Y)), transform.Linear)
-	if err := imgio.Save(imageUploadDirName+req.ImageId+"_small"+imageFileExtension, resized50, imageEncodingType); err != nil {
-		fmt.Println(err)
-	}
-	s3upload.UploadImageToS3(req.ImageId, req.ImageId+"_small"+imageFileExtension, imageUploadDirName+req.ImageId+"_small"+imageFileExtension)
-
-	return &resizeimagemspb.ResizeImageResponse{
-		ImagesResized: 1,
-	}, nil
+	s3upload.UploadImageToS3(imageID, imageID+prefix+imageFileExtension, imageUploadDirName+imageID+prefix+imageFileExtension)
 }
 
 func init() {
