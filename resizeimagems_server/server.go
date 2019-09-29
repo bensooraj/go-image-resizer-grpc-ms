@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	mysqldb "github.com/bensooraj/go-image-resizer-grpc-ms/database"
+	"github.com/bensooraj/go-image-resizer-grpc-ms/s3upload"
 
 	"github.com/anthonynsimon/bild/imgio"
 	"github.com/anthonynsimon/bild/transform"
@@ -85,7 +86,7 @@ func resizeAndUpload(baseImage image.Image, imageID, imageFileExtension string, 
 	if err := imgio.Save(imageUploadDirName+imageID+prefix+imageFileExtension, resized75, imageEncodingType); err != nil {
 		fmt.Println(err)
 	}
-	// s3upload.UploadImageToS3(imageID, imageID+prefix+imageFileExtension, imageUploadDirName+imageID+prefix+imageFileExtension)
+	s3upload.UploadImageToS3(imageID, imageID+prefix+imageFileExtension, imageUploadDirName+imageID+prefix+imageFileExtension)
 
 	// Upload to MySQL
 	statement, err := mysqldb.Db.Prepare("INSERT INTO images(image_id, scale, image_url) VALUES(?, ?, ?)")
@@ -118,7 +119,7 @@ func init() {
 }
 
 func main() {
-	fmt.Println("Calculator Server")
+	fmt.Println("Resize Image Golang GRPC Server")
 
 	lis, err := net.Listen("tcp", "0.0.0.0:50051")
 	if err != nil {
