@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	mysqldb "github.com/bensooraj/go-image-resizer-grpc-ms/database"
+
 	"github.com/anthonynsimon/bild/imgio"
 	"github.com/anthonynsimon/bild/transform"
 	"github.com/bensooraj/go-image-resizer-grpc-ms/resizeimagemspb"
-	"github.com/bensooraj/go-image-resizer-grpc-ms/s3upload"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 )
@@ -49,6 +50,8 @@ func (*server) ResizeImage(ctx context.Context, req *resizeimagemspb.ResizeImage
 
 	wg.Wait()
 
+	fmt.Println("Done Waiting For The Image Resizing Operation.")
+
 	return &resizeimagemspb.ResizeImageResponse{
 		ImagesResized: 2,
 	}, nil
@@ -58,6 +61,7 @@ func resizeAndUpload(baseImage image.Image, imageID, imageFileExtension string, 
 	defer wg.Done()
 	// Get the IMAGE_UPLOAD_DIRECTORY environment variable
 	imageUploadDirName, _ := os.LookupEnv("IMAGE_UPLOAD_DIRECTORY")
+	imageHostDomainName, _ := os.LookupEnv("IMAGE_HOST_DOMAIN_NAME")
 
 	imageSize := baseImage.Bounds().Size()
 
@@ -76,12 +80,34 @@ func resizeAndUpload(baseImage image.Image, imageID, imageFileExtension string, 
 	}
 
 	mut.Lock()
+	defer mut.Unlock()
 	resized75 := transform.Resize(baseImage, int(scale*float64(imageSize.X)), int(scale*float64(imageSize.Y)), transform.Linear)
-	mut.Unlock()
 	if err := imgio.Save(imageUploadDirName+imageID+prefix+imageFileExtension, resized75, imageEncodingType); err != nil {
 		fmt.Println(err)
 	}
-	s3upload.UploadImageToS3(imageID, imageID+prefix+imageFileExtension, imageUploadDirName+imageID+prefix+imageFileExtension)
+	// s3upload.UploadImageToS3(imageID, imageID+prefix+imageFileExtension, imageUploadDirName+imageID+prefix+imageFileExtension)
+
+	// Upload to MySQL
+	statement, err := mysqldb.Db.Prepare("INSERT INTO images(image_id, scale, image_url) VALUES(?, ?, ?)")
+	if err != nil {
+		log.Fatalf("Error preparing the DB query: %v", err)
+	}
+
+	imageURL := fmt.Sprintf("%s/%s/%s", imageHostDomainName, imageID, imageID+prefix+imageFileExtension)
+	result, err := statement.Exec(imageID, scale, imageURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lastID, err := result.LastInsertId()
+	if err != nil {
+		log.Fatal(err)
+	}
+	rowCount, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("\n[%s] Last ID inserted: %d\nRows affected: %d\n", imageID, lastID, rowCount)
+
 }
 
 func init() {
